@@ -1,0 +1,101 @@
+//SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.26;
+
+struct Bet {
+    uint amount;
+    uint candidate;
+    uint timestamp;
+    uint claimed;
+}
+
+struct Dispute {
+    string candidate1;
+    string candidate2;
+    string image1;
+    string image2;
+    uint total1;
+    uint total2;
+    uint winner;
+}
+
+contract BetCandidate {
+
+    Dispute public dispute; // criar uma disputa publica para toda a gente poder ver os dados
+    mapping(address => Bet) public allBets; // para cada endereço de carteira tem uma aposta associada
+
+
+    address owner;
+    uint fee = 10000; // 10 000 = 100% (porque não existem casas decimais) - comissão nunca vai ser negativa, logo pode ser unsigned int
+    uint public netPrize;
+
+    constructor(){
+        owner = msg.sender; // msg.sender quem disparou o contrato, ou seja, o owner
+        dispute = Dispute ({
+            candidate1: "Donal Trump",
+            candidate2: "Kamala Harris",
+            image1: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Donald_Trump_official_portrait.jpg/330px-Donald_Trump_official_portrait.jpg",
+            image2: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Kamala_Harris_Vice_Presidential_Portrait.jpg/345px-Kamala_Harris_Vice_Presidential_Portrait.jpg",
+            total1: 0,
+            total2: 0,
+            winner: 0
+        });
+    }
+
+    // external porque vai ser chamada fora do contracto (frontend) e payable espera um pagamento de algo
+    function bet(uint candidate) external payable  {
+
+        // Condições para uma aposta
+
+        require(candidate == 1 || candidate == 2, "Invalid Candidate");
+        require(msg.value > 0, "Invalid bet");
+        require(dispute.winner == 0, "Dispute closed");
+
+        Bet memory newBet; // memory - objeto temporário
+        newBet.amount = msg.value;
+        newBet.candidate = candidate;
+        newBet.timestamp = block.timestamp; // block - bloco atual da blockchain
+    
+        allBets[msg.sender] = newBet;
+
+        if(candidate == 1)
+            dispute.total1 += msg.value;
+        else 
+            dispute.total2 += msg.value;
+    }
+
+    // Declarar o vencedor
+    function finish(uint winner) external {
+        require(msg.sender == owner, "Invalid Account");
+        require(winner == 1 || winner == 2, "Invalid Candidate");
+        require(dispute.winner == 0, "Dispute closed");
+
+        dispute.winner = winner;
+
+        uint grossPrize = dispute.total1 + dispute.total2; // ganha o prémio acumulado das apostas dos 2 candidatos
+        uint comission = (grossPrize * fee) / 1e4;
+        netPrize = grossPrize - comission;
+
+        payable(owner).transfer(comission); // pagar ao owner a comissão
+        
+    }
+
+
+    // O ganhador dá claim
+    function claim() external {
+        Bet memory userBet = allBets[msg.sender];
+
+         // Verificar se existe um vencedor, se o endereço que chamou a função é o do vencedor e se este não reclamou já o prémio
+        require(dispute.winner > 0 && dispute.winner == userBet.candidate && userBet.claimed == 0, "Invalid Claim");
+    
+    
+        uint winnerAmount = dispute.winner == 1 ? dispute.total1 : dispute.total2;
+
+        // Percentagem do total de apostas no candidato vencedor
+        uint ratio = (userBet.amount * 1e4) / winnerAmount;
+        uint individualPrize = netPrize * ratio / 1e4;
+        allBets[msg.sender].claimed = individualPrize;
+        payable(msg.sender).transfer(individualPrize);
+    }
+
+}
